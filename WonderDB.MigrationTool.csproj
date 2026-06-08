@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>WonderDB.MigrationTool</RootNamespace>
+
+    <!-- Global tool packaging -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>wonderdb</ToolCommandName>
+    <PackageId>wonderdb-migration-tool</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>WonderBiz Technologies</Authors>
+    <Description>Database migration tool for .NET Clean Architecture projects. Discovers DbContexts from Infrastructure assemblies, resolves configuration, and runs EF Core / MongoDB migrations programmatically.</Description>
+    <PackageProjectUrl>https://github.com/wonderbiz/wonderdb-migration-tool</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/wonderbiz/wonderdb-migration-tool</RepositoryUrl>
+    <PackageTags>efcore;migrations;database;cli;mongodb;clean-architecture</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- CLI argument parsing -->
+    <PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
+
+    <!-- Interactive prompts and colored output -->
+    <PackageReference Include="Spectre.Console" Version="0.49.1" />
+
+    <!-- Configuration reading -->
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="8.0.0" />
+
+    <!-- Dependency injection -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
+
+    <!-- EF Core migrations -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.10" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.10">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.10" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.10" />
+
+    <!-- MongoDB -->
+    <PackageReference Include="MongoDB.Driver" Version="2.28.0" />
+  </ItemGroup>
+
+</Project>

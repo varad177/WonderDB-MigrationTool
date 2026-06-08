@@ -1,0 +1,15 @@
+services:
+  wonderdb-migration:
+    build:
+      context: .
+      dockerfile: Docker/Dockerfile
+    image: wonderbiz/wonderdb-migration:1.0.0
+    container_name: wonderdb-migration
+    stdin_open: true
+    tty: true
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+    command: ["tail", "-f", "/dev/null"]

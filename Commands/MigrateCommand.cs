@@ -29,12 +29,17 @@ public static class MigrateCommand
             "--env", "Environment name (Development, Staging, Production)");
         var auditDbOption = new Option<bool>(
             "--audit-db", "Also write audit log to the target database");
+        var schemaOption = new Option<string?>(
+            "--schema",
+            "Target schema name for migration (overrides the auto-derived schema). " +
+            "Use this for per-client schema isolation (e.g. --schema client_acme).");
 
         command.AddOption(infrastructureOption);
         command.AddOption(allOption);
         command.AddOption(dryRunOption);
         command.AddOption(envOption);
         command.AddOption(auditDbOption);
+        command.AddOption(schemaOption);
 
         command.SetHandler(async (InvocationContext ctx) =>
         {
@@ -43,6 +48,7 @@ public static class MigrateCommand
             var dryRun = ctx.ParseResult.GetValueForOption(dryRunOption);
             var env = ctx.ParseResult.GetValueForOption(envOption);
             var auditDb = ctx.ParseResult.GetValueForOption(auditDbOption);
+            var schema = ctx.ParseResult.GetValueForOption(schemaOption);
 
             try
             {
@@ -52,7 +58,7 @@ public static class MigrateCommand
                 }
                 else if (!string.IsNullOrEmpty(infrastructure))
                 {
-                    await RunDirectMigrationAsync(services, infrastructure, env, dryRun, auditDb);
+                    await RunDirectMigrationAsync(services, infrastructure, env, dryRun, auditDb, schema);
                 }
                 else
                 {
@@ -76,89 +82,137 @@ public static class MigrateCommand
         IServiceProvider services, string? env, bool auditDb)
     {
         var promptService = services.GetRequiredService<PromptService>();
-        var infrastructurePath = promptService.PromptForInfrastructurePath();
-
         var loader = services.GetRequiredService<InfrastructureLoader>();
-        var assembly = await loader.LoadAssemblyAsync(infrastructurePath);
-        var dbContexts = loader.DiscoverDbContexts(assembly);
-
-        if (dbContexts.Count == 0)
-        {
-            AnsiConsole.MarkupLine("[yellow]⚠ No DbContexts found in the assembly.[/]");
-            return;
-        }
-
         var configResolver = services.GetRequiredService<ConfigResolver>();
-        var config = configResolver.Resolve(infrastructurePath, env);
-        var connectionStrings = configResolver.GetConnectionStrings(config);
-
         var detector = services.GetRequiredService<ProviderDetector>();
-        var dbName = promptService.SelectDatabase(connectionStrings, detector);
-        var connectionString = connectionStrings[dbName];
-        var providerType = detector.Detect(connectionString);
-
-        var selectedContexts = promptService.SelectDbContexts(dbContexts);
-        var mode = promptService.SelectMode();
-
-        // Test connection
         var connectionTester = services.GetRequiredService<ConnectionTester>();
-        var isConnected = await connectionTester.TestConnectionAsync(connectionString, providerType);
-        if (!isConnected)
-        {
-            AnsiConsole.MarkupLine("[red]✗ Aborting — database is unreachable.[/]");
-            return;
-        }
 
-        var projectName = new DirectoryInfo(infrastructurePath).Name
-            .Replace(".Infrastructure", string.Empty);
-
-        foreach (var ctxInfo in selectedContexts)
+        while (true)
         {
-            var migrationContext = new MigrationContext
+            var infrastructurePath = promptService.PromptForInfrastructurePath();
+            var dbContexts = await loader.DiscoverDbContextsAsync(infrastructurePath);
+
+            if (dbContexts.Count == 0)
             {
-                DbContextType = ctxInfo.DbContextType,
-                ConnectionString = connectionString,
-                ProviderType = providerType,
-                InfrastructurePath = infrastructurePath,
-                ProjectName = projectName,
-                DatabaseName = dbName,
-                SchemaName = ctxInfo.SchemaName,
-                InfrastructureAssembly = assembly
-            };
+                AnsiConsole.MarkupLine("[yellow]⚠ No DbContexts found in the project.[/]");
+                continue;
+            }
 
-            var provider = ResolveProvider(services, providerType);
+            var config = configResolver.Resolve(infrastructurePath, env);
+            var connectionStrings = configResolver.GetConnectionStrings(config);
+
+            if (connectionStrings.Count == 0)
+            {
+                AnsiConsole.MarkupLine("[red]✗ No connection strings found in configuration.[/]");
+                continue;
+            }
+
+            var projectName = new DirectoryInfo(infrastructurePath).Name
+                .Replace(".Infrastructure", string.Empty);
+
+            var dbName = promptService.SelectDatabase(connectionStrings, detector);
+            var connectionString = connectionStrings[dbName];
+            var providerType = detector.Detect(connectionString);
+
+            var selectedContexts = promptService.SelectDbContexts(dbContexts, providerType);
+
+            // Test connection
+            var isConnected = await connectionTester.TestConnectionAsync(connectionString, providerType);
+            if (!isConnected)
+            {
+                AnsiConsole.MarkupLine("[red]✗ Aborting — database is unreachable. Please select another.[/]");
+                continue;
+            }
 
             AnsiConsole.WriteLine();
-            AnsiConsole.Write(new Rule($"[cyan]{ctxInfo.DbContextType.Name}[/]").LeftJustified());
+            AnsiConsole.MarkupLine($"[green]✓ Setup complete. Targeting '{dbName}' on '{projectName}'.[/]");
 
-            switch (mode)
+            var changeDb = false;
+            while (!changeDb)
             {
-                case MigrationMode.MigrateAndUpdate:
-                    await provider.MigrateAsync(migrationContext);
-                    await LogAuditAsync(services, migrationContext, "Migrate", "Success", auditDb);
-                    break;
+                var mode = promptService.SelectMode();
+                if (mode == MigrationMode.Exit)
+                {
+                    AnsiConsole.MarkupLine("[grey]Exiting WonderDB Migration Tool. Goodbye![/]");
+                    return;
+                }
 
-                case MigrationMode.DryRun:
-                    await provider.DryRunAsync(migrationContext);
-                    await LogAuditAsync(services, migrationContext, "DryRun", "Success", auditDb);
-                    break;
+                if (mode == MigrationMode.ChangeDatabase)
+                {
+                    changeDb = true;
+                    continue;
+                }
 
-                case MigrationMode.Status:
-                    var statuses = await provider.GetStatusAsync(migrationContext);
-                    RenderStatusTable(statuses, ctxInfo.DbContextType.Name);
-                    break;
+                foreach (var ctxInfo in selectedContexts)
+                {
+                    var provider = ResolveProvider(services, providerType);
+                    var schemaStore = services.GetRequiredService<SchemaStore>();
+                    var savedSchema = schemaStore.Get(infrastructurePath, ctxInfo.ContextName);
 
-                case MigrationMode.Rollback:
-                    var target = promptService.PromptForRollbackTarget();
-                    await provider.RollbackAsync(migrationContext, target);
-                    await LogAuditAsync(services, migrationContext, "Rollback", "Success", auditDb, target);
-                    break;
+                    // Schema is relevant for applying/rolling back, but NOT for generating.
+                    string schemaName;
+                    if (mode == MigrationMode.GenerateMigration)
+                    {
+                        schemaName = "__WONDERDB_DYNAMIC_SCHEMA__";
+                    }
+                    else
+                    {
+                        schemaName = promptService.PromptForSchemaName(savedSchema ?? ctxInfo.SchemaName);
+                    }
 
-                case MigrationMode.GenerateMigration:
-                    var migName = promptService.PromptForMigrationName();
-                    await provider.GenerateAsync(migrationContext, migName);
-                    await LogAuditAsync(services, migrationContext, "Generate", "Success", auditDb, migName);
-                    break;
+                    var migrationContext = new MigrationContext
+                    {
+                        ContextName = ctxInfo.ContextName,
+                        ConnectionString = connectionString,
+                        ProviderType = providerType,
+                        InfrastructurePath = infrastructurePath,
+                        ProjectName = projectName,
+                        DatabaseName = dbName,
+                        SchemaName = schemaName
+                    };
+
+                    AnsiConsole.WriteLine();
+                    AnsiConsole.Write(new Rule($"[cyan]{ctxInfo.ContextName}[/] [grey](schema: {schemaName})[/]").LeftJustified());
+
+                    try
+                    {
+                        switch (mode)
+                        {
+                            case MigrationMode.MigrateAndUpdate:
+                                await provider.MigrateAsync(migrationContext);
+                                await LogAuditAsync(services, migrationContext, "Migrate", "Success", auditDb);
+                                break;
+
+                            case MigrationMode.DryRun:
+                                await provider.DryRunAsync(migrationContext);
+                                await LogAuditAsync(services, migrationContext, "DryRun", "Success", auditDb);
+                                break;
+
+                            case MigrationMode.Status:
+                                var statuses = await provider.GetStatusAsync(migrationContext);
+                                RenderStatusTable(statuses, ctxInfo.ContextName);
+                                break;
+
+                            case MigrationMode.Rollback:
+                                var target = promptService.PromptForRollbackTarget();
+                                await provider.RollbackAsync(migrationContext, target);
+                                await LogAuditAsync(services, migrationContext, "Rollback", "Success", auditDb, target);
+                                break;
+
+                            case MigrationMode.GenerateMigration:
+                                var migName = promptService.PromptForMigrationName();
+                                await provider.GenerateAsync(migrationContext, migName);
+                                schemaStore.Save(infrastructurePath, ctxInfo.ContextName, schemaName);
+                                await LogAuditAsync(services, migrationContext, "Generate", "Success", auditDb, migName);
+                                break;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        AnsiConsole.MarkupLine($"\n[red]✗ Operation failed:[/] {Markup.Escape(ex.Message)}");
+                        AnsiConsole.MarkupLine("[yellow]The tool has caught this error and prevented a crash. Returning to main menu...[/]");
+                    }
+                }
             }
         }
     }
@@ -167,7 +221,8 @@ public static class MigrateCommand
     /// Direct migration with an explicit --infrastructure path.
     /// </summary>
     private static async Task RunDirectMigrationAsync(
-        IServiceProvider services, string infrastructurePath, string? env, bool dryRun, bool auditDb)
+        IServiceProvider services, string infrastructurePath, string? env, bool dryRun, bool auditDb,
+        string? schemaOverride = null)
     {
         infrastructurePath = Path.GetFullPath(infrastructurePath);
 
@@ -178,12 +233,11 @@ public static class MigrateCommand
         }
 
         var loader = services.GetRequiredService<InfrastructureLoader>();
-        var assembly = await loader.LoadAssemblyAsync(infrastructurePath);
-        var dbContexts = loader.DiscoverDbContexts(assembly);
+        var dbContexts = await loader.DiscoverDbContextsAsync(infrastructurePath);
 
         if (dbContexts.Count == 0)
         {
-            AnsiConsole.MarkupLine("[yellow]⚠ No DbContexts found in the assembly.[/]");
+            AnsiConsole.MarkupLine("[yellow]⚠ No DbContexts found in the project.[/]");
             return;
         }
 
@@ -213,24 +267,30 @@ public static class MigrateCommand
                 continue;
             }
 
+            var schemaStore = services.GetRequiredService<SchemaStore>();
+
             foreach (var ctxInfo in dbContexts)
             {
+                var savedSchema = schemaStore.Get(infrastructurePath, ctxInfo.ContextName);
+                // schemaOverride comes from --schema flag; fall back to saved schema, then derived
+                var schemaName = schemaOverride ?? savedSchema ?? ctxInfo.SchemaName;
+
                 var migrationContext = new MigrationContext
                 {
-                    DbContextType = ctxInfo.DbContextType,
+                    ContextName = ctxInfo.ContextName,
                     ConnectionString = cs.Value,
                     ProviderType = providerType,
                     InfrastructurePath = infrastructurePath,
                     ProjectName = projectName,
                     DatabaseName = cs.Key,
-                    SchemaName = ctxInfo.SchemaName,
-                    InfrastructureAssembly = assembly
+                    SchemaName = schemaName
                 };
 
                 var provider = ResolveProvider(services, providerType);
 
                 AnsiConsole.WriteLine();
-                AnsiConsole.Write(new Rule($"[cyan]{ctxInfo.DbContextType.Name} → {cs.Key}[/]").LeftJustified());
+                AnsiConsole.Write(new Rule(
+                    $"[cyan]{ctxInfo.ContextName} → {cs.Key}[/] [grey](schema: {schemaName})[/]").LeftJustified());
 
                 if (dryRun)
                 {
@@ -262,17 +322,22 @@ public static class MigrateCommand
             return;
         }
 
-        AnsiConsole.MarkupLine($"[blue]ℹ Found {projects.Count} project(s). Starting batch migration...[/]");
+        AnsiConsole.MarkupLine(
+            $"[blue]ℹ Found {projects.Count} project(s). Starting parallel batch migration (max 3 concurrent)...[/]");
 
-        var results = new List<(string Project, string Status, string Details)>();
+        var results = new System.Collections.Concurrent.ConcurrentBag<(string Project, string Status, string Details)>();
 
-        foreach (var project in projects)
+        // Limit concurrency to 3 projects at a time to avoid overwhelming the machine
+        var semaphore = new SemaphoreSlim(3, 3);
+
+        var tasks = projects.Select(async project =>
         {
-            AnsiConsole.WriteLine();
-            AnsiConsole.Write(new Rule($"[cyan]{project.Name}[/]").LeftJustified());
-
+            await semaphore.WaitAsync();
             try
             {
+                AnsiConsole.WriteLine();
+                AnsiConsole.Write(new Rule($"[cyan]{project.Name}[/]").LeftJustified());
+
                 await RunDirectMigrationAsync(services, project.InfrastructurePath, env, dryRun, auditDb);
                 results.Add((project.Name, "✓ Success", dryRun ? "Dry run completed" : "Migrations applied"));
             }
@@ -281,7 +346,13 @@ public static class MigrateCommand
                 AnsiConsole.MarkupLine($"[red]✗ Failed:[/] {Markup.Escape(ex.Message)}");
                 results.Add((project.Name, "✗ Failed", ex.Message));
             }
-        }
+            finally
+            {
+                semaphore.Release();
+            }
+        });
+
+        await Task.WhenAll(tasks);
 
         // Summary table
         AnsiConsole.WriteLine();
@@ -293,7 +364,7 @@ public static class MigrateCommand
             .AddColumn(new TableColumn("[bold]Status[/]").Centered())
             .AddColumn(new TableColumn("[bold]Details[/]").LeftAligned());
 
-        foreach (var (proj, status, details) in results)
+        foreach (var (proj, status, details) in results.OrderBy(r => r.Project))
         {
             var statusColor = status.Contains("Success") ? "green" : "red";
             table.AddRow(
@@ -334,7 +405,7 @@ public static class MigrateCommand
         {
             Project = context.ProjectName,
             Database = context.DatabaseName,
-            Context = context.DbContextType?.Name ?? "MongoDB",
+            Context = context.ContextName ?? "MongoDB",
             MigrationName = migrationName ?? "All",
             Mode = mode,
             Result = result

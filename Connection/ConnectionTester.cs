@@ -52,15 +52,24 @@ public class ConnectionTester
         };
 
         await using var connection = new SqlConnection(builder.ConnectionString);
-        await connection.OpenAsync();
+        try
+        {
+            await connection.OpenAsync();
 
-        // Run a trivial query to confirm the connection is usable
-        await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT 1";
-        await command.ExecuteScalarAsync();
+            // Run a trivial query to confirm the connection is usable
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT 1";
+            await command.ExecuteScalarAsync();
 
-        AnsiConsole.MarkupLine("[green]✓ SQL Server connection successful.[/]");
-        return true;
+            AnsiConsole.MarkupLine("[green]✓ SQL Server connection successful.[/]");
+            return true;
+        }
+        catch (SqlException ex) when (ex.Number == 4060)
+        {
+            // Error 4060: Cannot open database requested by the login.
+            AnsiConsole.MarkupLine("[green]✓ SQL Server reachable (target database will be created).[/]");
+            return true;
+        }
     }
 
     private static async Task<bool> TestPostgreSQLAsync(string connectionString)
@@ -71,14 +80,23 @@ public class ConnectionTester
         };
 
         await using var connection = new NpgsqlConnection(builder.ConnectionString);
-        await connection.OpenAsync();
+        try
+        {
+            await connection.OpenAsync();
 
-        await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT 1";
-        await command.ExecuteScalarAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT 1";
+            await command.ExecuteScalarAsync();
 
-        AnsiConsole.MarkupLine("[green]✓ PostgreSQL connection successful.[/]");
-        return true;
+            AnsiConsole.MarkupLine("[green]✓ PostgreSQL connection successful.[/]");
+            return true;
+        }
+        catch (PostgresException ex) when (ex.SqlState == "3D000")
+        {
+            // Error 3D000: database does not exist
+            AnsiConsole.MarkupLine("[green]✓ PostgreSQL reachable (target database will be created).[/]");
+            return true;
+        }
     }
 
     private static async Task<bool> TestMongoDbAsync(string connectionString)

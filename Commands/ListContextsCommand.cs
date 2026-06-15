@@ -57,12 +57,11 @@ public static class ListContextsCommand
         }
 
         var loader = services.GetRequiredService<InfrastructureLoader>();
-        var assembly = await loader.LoadAssemblyAsync(infrastructurePath);
-        var dbContexts = loader.DiscoverDbContexts(assembly);
+        var dbContexts = await loader.DiscoverDbContextsAsync(infrastructurePath);
 
         if (dbContexts.Count == 0)
         {
-            AnsiConsole.MarkupLine("[yellow]No DbContext classes found in the assembly.[/]");
+            AnsiConsole.MarkupLine("[yellow]No DbContext classes found in the project.[/]");
             AnsiConsole.MarkupLine(
                 "[grey]Ensure your Infrastructure project contains classes that inherit from " +
                 "Microsoft.EntityFrameworkCore.DbContext.[/]");
@@ -76,17 +75,18 @@ public static class ListContextsCommand
             .AddColumn(new TableColumn("[bold]DbContext[/]").LeftAligned())
             .AddColumn(new TableColumn("[bold]Schema[/]").LeftAligned())
             .AddColumn(new TableColumn("[bold]Namespace[/]").LeftAligned())
-            .AddColumn(new TableColumn("[bold]Assembly[/]").LeftAligned());
+            .AddColumn(new TableColumn("[bold]Assembly[/]").LeftAligned())
+            .AddColumn(new TableColumn("[bold]Project Path[/]").LeftAligned());
 
         for (var i = 0; i < dbContexts.Count; i++)
         {
             var ctx = dbContexts[i];
             table.AddRow(
                 $"[grey]{i + 1}[/]",
-                $"[white]{Markup.Escape(ctx.DbContextType.Name)}[/]",
+                $"[white]{Markup.Escape(ctx.ContextName)}[/]",
                 Markup.Escape(ctx.SchemaName),
-                Markup.Escape(ctx.DbContextType.Namespace ?? "—"),
-                Markup.Escape(Path.GetFileName(ctx.AssemblyPath)));
+                "—",
+                Markup.Escape(ctx.ProjectPath));
         }
 
         AnsiConsole.Write(table);

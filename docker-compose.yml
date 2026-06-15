@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Docker/Dockerfile
-    image: wonderbiz/wonderdb-migration:1.0.0
+    image: varad1777/wonderdb-migration:1.0.0
     container_name: wonderdb-migration
     stdin_open: true
     tty: true

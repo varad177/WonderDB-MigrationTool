@@ -63,12 +63,11 @@ public static class StatusCommand
         }
 
         var loader = services.GetRequiredService<InfrastructureLoader>();
-        var assembly = await loader.LoadAssemblyAsync(infrastructurePath);
-        var dbContexts = loader.DiscoverDbContexts(assembly);
+        var dbContexts = await loader.DiscoverDbContextsAsync(infrastructurePath);
 
         if (dbContexts.Count == 0)
         {
-            AnsiConsole.MarkupLine("[yellow]⚠ No DbContexts found in the assembly.[/]");
+            AnsiConsole.MarkupLine("[yellow]⚠ No DbContexts found in the project.[/]");
             return;
         }
 
@@ -100,13 +99,12 @@ public static class StatusCommand
             {
                 var migrationContext = new MigrationContext
                 {
-                    DbContextType = ctxInfo.DbContextType,
+                    ContextName = ctxInfo.ContextName,
                     ConnectionString = cs.Value,
                     ProviderType = providerType,
                     InfrastructurePath = infrastructurePath,
                     DatabaseName = cs.Key,
-                    SchemaName = ctxInfo.SchemaName,
-                    InfrastructureAssembly = assembly
+                    SchemaName = ctxInfo.SchemaName
                 };
 
                 IDbMigrationProvider provider = providerType == DbProviderType.MongoDB
@@ -115,7 +113,7 @@ public static class StatusCommand
 
                 AnsiConsole.WriteLine();
                 var statuses = await provider.GetStatusAsync(migrationContext);
-                MigrateCommand.RenderStatusTable(statuses, ctxInfo.DbContextType.Name);
+                MigrateCommand.RenderStatusTable(statuses, ctxInfo.ContextName);
             }
         }
     }

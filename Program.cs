@@ -16,8 +16,10 @@ namespace WonderDB.MigrationTool;
 public static class Program
 {
     public static async Task<int> Main(string[] args)
-    {
-        var services = ConfigureServices();
+    {// here The Application start
+
+        var services = ConfigureServices(); // Dependency Injection container.
+        // just creating the registry which can be requested later
 
         var rootCommand = new RootCommand(
             "WonderDB Migration Tool — Database migration CLI for .NET Clean Architecture projects by WonderBiz Technologies");
@@ -44,6 +46,7 @@ public static class Program
         services.AddSingleton<ProjectScanner>();
         services.AddSingleton<InfrastructureLoader>();
         services.AddSingleton<ConfigResolver>();
+        services.AddSingleton<SchemaStore>();
         services.AddSingleton<ProviderDetector>();
 
         // Connection

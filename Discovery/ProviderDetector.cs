@@ -41,9 +41,9 @@ public class ProviderDetector
             return DbProviderType.SQLite;
         }
 
-        // PostgreSQL: Host= keyword or default Postgres port
+        // PostgreSQL: Host= keyword or Port= keyword (SQL Server uses "Server=...,1433" instead of Port=)
         if (Regex.IsMatch(connectionString, @"Host\s*=", RegexOptions.IgnoreCase) ||
-            Regex.IsMatch(connectionString, @"Port\s*=\s*5432", RegexOptions.IgnoreCase))
+            Regex.IsMatch(connectionString, @"Port\s*=", RegexOptions.IgnoreCase))
         {
             return DbProviderType.PostgreSQL;
         }

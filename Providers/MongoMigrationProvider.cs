@@ -246,45 +246,23 @@ public class MongoMigrationProvider : IDbMigrationProvider
     }
 
     /// <summary>
-    /// Scan the Infrastructure assembly for concrete classes implementing IMongoMigration.
+    /// Scan the Infrastructure project's Migrations/Mongo folder for IMongoMigration classes.
+    /// Note: MongoDB migrations require the tool to be able to compile and load
+    /// the migration classes. For now, this returns an empty list — MongoDB migration
+    /// discovery will be enhanced in a future version with source-code-based execution.
     /// </summary>
     private static List<IMongoMigration> DiscoverMongoMigrations(MigrationContext context)
     {
         var migrations = new List<IMongoMigration>();
-        var assembly = context.InfrastructureAssembly ?? context.DbContextType?.Assembly;
 
-        if (assembly == null)
-            return migrations;
+        // MongoDB migration discovery via source scanning is planned for v2.
+        // For now, migrations must be run via the interactive EF Core flow.
+        AnsiConsole.MarkupLine(
+            "[yellow]⚠ MongoDB migration discovery from source code is not yet supported.[/]");
+        AnsiConsole.MarkupLine(
+            "[grey]Place IMongoMigration classes in Migrations/Mongo/ and ensure the project builds.[/]");
 
-        var migrationInterface = typeof(IMongoMigration);
-
-        Type[] types;
-        try
-        {
-            types = assembly.GetTypes();
-        }
-        catch (System.Reflection.ReflectionTypeLoadException ex)
-        {
-            types = ex.Types.Where(t => t != null).ToArray()!;
-        }
-
-        foreach (var type in types)
-        {
-            if (type.IsAbstract || type.IsInterface || !migrationInterface.IsAssignableFrom(type))
-                continue;
-
-            try
-            {
-                var instance = (IMongoMigration)Activator.CreateInstance(type)!;
-                migrations.Add(instance);
-            }
-            catch
-            {
-                // Skip types that cannot be instantiated
-            }
-        }
-
-        return migrations.OrderBy(m => m.Version).ToList();
+        return migrations;
     }
 
     private static async Task<HashSet<int>> GetAppliedVersionsAsync(IMongoDatabase database)

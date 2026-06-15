@@ -70,12 +70,11 @@ public static class GenerateCommand
         }
 
         var loader = services.GetRequiredService<InfrastructureLoader>();
-        var assembly = await loader.LoadAssemblyAsync(infrastructurePath);
-        var dbContexts = loader.DiscoverDbContexts(assembly);
+        var dbContexts = await loader.DiscoverDbContextsAsync(infrastructurePath);
 
         if (dbContexts.Count == 0)
         {
-            AnsiConsole.MarkupLine("[yellow]⚠ No DbContexts found in the assembly.[/]");
+            AnsiConsole.MarkupLine("[yellow]⚠ No DbContexts found in the project.[/]");
             return;
         }
 
@@ -90,17 +89,16 @@ public static class GenerateCommand
         string dbName = string.Empty;
         string connectionString = string.Empty;
 
+        var promptSvc = services.GetRequiredService<Interactive.PromptService>();
+
         if (connectionStrings.Count > 0)
         {
-            var promptSvc = services.GetRequiredService<Interactive.PromptService>();
             dbName = promptSvc.SelectDatabase(connectionStrings, detector);
             connectionString = connectionStrings[dbName];
             providerType = detector.Detect(connectionString);
         }
 
-        var selectedContexts = dbContexts.Count > 1
-            ? services.GetRequiredService<Interactive.PromptService>().SelectDbContexts(dbContexts)
-            : dbContexts;
+        var selectedContexts = promptSvc.SelectDbContexts(dbContexts, providerType);
 
         var projectName = new DirectoryInfo(infrastructurePath).Name
             .Replace(".Infrastructure", string.Empty);
@@ -110,14 +108,13 @@ public static class GenerateCommand
         {
             var migrationContext = new MigrationContext
             {
-                DbContextType = ctxInfo.DbContextType,
+                ContextName = ctxInfo.ContextName,
                 ConnectionString = connectionString,
                 ProviderType = providerType,
                 InfrastructurePath = infrastructurePath,
                 ProjectName = projectName,
                 DatabaseName = dbName,
-                SchemaName = ctxInfo.SchemaName,
-                InfrastructureAssembly = assembly
+                SchemaName = ctxInfo.SchemaName
             };
 
             IDbMigrationProvider provider = providerType == DbProviderType.MongoDB
@@ -125,7 +122,7 @@ public static class GenerateCommand
                 : services.GetRequiredService<EFCoreMigrationProvider>();
 
             AnsiConsole.WriteLine();
-            AnsiConsole.Write(new Rule($"[cyan]{ctxInfo.DbContextType.Name}[/]").LeftJustified());
+            AnsiConsole.Write(new Rule($"[cyan]{ctxInfo.ContextName}[/]").LeftJustified());
 
             await provider.GenerateAsync(migrationContext, migrationName);
 
@@ -133,7 +130,7 @@ public static class GenerateCommand
             {
                 Project = projectName,
                 Database = dbName,
-                Context = ctxInfo.DbContextType.Name,
+                Context = ctxInfo.ContextName,
                 MigrationName = migrationName,
                 Mode = "Generate",
                 Result = "Success"

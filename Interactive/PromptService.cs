@@ -12,7 +12,9 @@ public enum MigrationMode
     DryRun,
     Status,
     Rollback,
-    GenerateMigration
+    GenerateMigration,
+    ChangeDatabase,
+    Exit
 }
 
 /// <summary>
@@ -113,22 +115,36 @@ public class PromptService
     /// <summary>
     /// Ask the user to select one or all DbContexts from the discovered list.
     /// </summary>
-    public List<DbContextInfo> SelectDbContexts(List<DbContextInfo> contexts)
+    public List<DbContextInfo> SelectDbContexts(List<DbContextInfo> contexts, DbProviderType providerType)
     {
         if (contexts.Count == 0)
             throw new InvalidOperationException(
                 "No DbContext classes found in the Infrastructure assembly.");
 
-        if (contexts.Count == 1)
+        // Smart filtering based on provider type vs context name conventions
+        var filteredContexts = contexts.Where(c => 
+        {
+            var name = c.ContextName.ToLowerInvariant();
+            if (providerType == DbProviderType.SqlServer && (name.Contains("pg") || name.Contains("postgres")))
+                return false;
+            if (providerType == DbProviderType.PostgreSQL && (name.Contains("sql") && !name.Contains("pgsql")))
+                return false;
+            return true;
+        }).ToList();
+
+        // Fallback to all if filtering removed everything
+        var listToUse = filteredContexts.Count > 0 ? filteredContexts : contexts;
+
+        if (listToUse.Count == 1)
         {
             AnsiConsole.MarkupLine(
-                $"[green]Using context:[/] {contexts[0].DbContextType.Name}  (schema: {contexts[0].SchemaName})");
-            return contexts;
+                $"[green]Using context:[/] {listToUse[0].ContextName}  (schema: {listToUse[0].SchemaName})");
+            return listToUse;
         }
 
         var choices = new List<string> { "All" };
         choices.AddRange(
-            contexts.Select(c => $"{c.DbContextType.Name}   (schema: {c.SchemaName})"));
+            listToUse.Select(c => $"{c.ContextName}   (schema: {c.SchemaName})"));
 
         var selected = AnsiConsole.Prompt(
             new SelectionPrompt<string>()
@@ -137,10 +153,10 @@ public class PromptService
                 .AddChoices(choices));
 
         if (selected == "All")
-            return contexts;
+            return listToUse;
 
         var contextName = selected.Split("   ")[0].Trim();
-        return contexts.Where(c => c.DbContextType.Name == contextName).ToList();
+        return listToUse.Where(c => c.ContextName == contextName).ToList();
     }
 
     /// <summary>
@@ -150,14 +166,16 @@ public class PromptService
     {
         var selected = AnsiConsole.Prompt(
             new SelectionPrompt<string>()
-                .Title("[blue]?[/] Select mode:")
+                .Title("\n[blue]?[/] What would you like to do?")
                 .HighlightStyle(new Style(Color.Cyan1))
                 .AddChoices(
+                    "Status / Diff",
+                    "Generate Migration",
                     "Migrate & Update",
                     "Dry Run",
-                    "Status / Diff",
                     "Rollback",
-                    "Generate Migration"));
+                    "Change Project / Database",
+                    "[grey]Exit[/]"));
 
         return selected switch
         {
@@ -166,7 +184,9 @@ public class PromptService
             "Status / Diff" => MigrationMode.Status,
             "Rollback" => MigrationMode.Rollback,
             "Generate Migration" => MigrationMode.GenerateMigration,
-            _ => MigrationMode.MigrateAndUpdate
+            "Change Project / Database" => MigrationMode.ChangeDatabase,
+            "[grey]Exit[/]" => MigrationMode.Exit,
+            _ => MigrationMode.Exit
         };
     }
 
@@ -198,5 +218,25 @@ public class PromptService
                     string.IsNullOrWhiteSpace(name)
                         ? ValidationResult.Error("[red]Migration name cannot be empty.[/]")
                         : ValidationResult.Success()));
+    }
+
+    /// <summary>
+    /// Prompt the user for a schema name to target during migration.
+    /// Shows the auto-derived default (e.g. "inventory") — press Enter to accept.
+    /// Used for client-level schema isolation (e.g. "client_acme").
+    /// </summary>
+    public string PromptForSchemaName(string defaultSchema)
+    {
+        return AnsiConsole.Prompt(
+            new TextPrompt<string>($"[blue]?[/] Schema name [grey](default: {defaultSchema})[/]:")
+                .DefaultValue(defaultSchema)
+                .Validate(name =>
+                {
+                    if (string.IsNullOrWhiteSpace(name))
+                        return ValidationResult.Error("[red]Schema name cannot be empty.[/]");
+                    if (name.Contains(' '))
+                        return ValidationResult.Error("[red]Schema name cannot contain spaces.[/]");
+                    return ValidationResult.Success();
+                }));
     }
 }

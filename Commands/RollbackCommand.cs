@@ -75,12 +75,11 @@ public static class RollbackCommand
         }
 
         var loader = services.GetRequiredService<InfrastructureLoader>();
-        var assembly = await loader.LoadAssemblyAsync(infrastructurePath);
-        var dbContexts = loader.DiscoverDbContexts(assembly);
+        var dbContexts = await loader.DiscoverDbContextsAsync(infrastructurePath);
 
         if (dbContexts.Count == 0)
         {
-            AnsiConsole.MarkupLine("[yellow]⚠ No DbContexts found in the assembly.[/]");
+            AnsiConsole.MarkupLine("[yellow]⚠ No DbContexts found in the project.[/]");
             return;
         }
 
@@ -114,20 +113,24 @@ public static class RollbackCommand
             return;
         }
 
-        var selectedContexts = promptSvc.SelectDbContexts(dbContexts);
+        var selectedContexts = promptSvc.SelectDbContexts(dbContexts, providerType);
+
+        var schemaStore = services.GetRequiredService<SchemaStore>();
 
         foreach (var ctxInfo in selectedContexts)
         {
+            var savedSchema = schemaStore.Get(infrastructurePath, ctxInfo.ContextName);
+            var schemaName = savedSchema ?? ctxInfo.SchemaName;
+
             var migrationContext = new MigrationContext
             {
-                DbContextType = ctxInfo.DbContextType,
+                ContextName = ctxInfo.ContextName,
                 ConnectionString = connectionString,
                 ProviderType = providerType,
                 InfrastructurePath = infrastructurePath,
                 ProjectName = projectName,
                 DatabaseName = dbName,
-                SchemaName = ctxInfo.SchemaName,
-                InfrastructureAssembly = assembly
+                SchemaName = schemaName
             };
 
             IDbMigrationProvider provider = providerType == DbProviderType.MongoDB
@@ -135,7 +138,7 @@ public static class RollbackCommand
                 : services.GetRequiredService<EFCoreMigrationProvider>();
 
             AnsiConsole.WriteLine();
-            AnsiConsole.Write(new Rule($"[cyan]{ctxInfo.DbContextType.Name}[/]").LeftJustified());
+            AnsiConsole.Write(new Rule($"[cyan]{ctxInfo.ContextName}[/]").LeftJustified());
 
             await provider.RollbackAsync(migrationContext, targetMigration);
 
@@ -143,7 +146,7 @@ public static class RollbackCommand
             {
                 Project = projectName,
                 Database = dbName,
-                Context = ctxInfo.DbContextType.Name,
+                Context = ctxInfo.ContextName,
                 MigrationName = targetMigration,
                 Mode = "Rollback",
                 Result = "Success"

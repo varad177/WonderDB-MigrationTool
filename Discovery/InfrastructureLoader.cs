@@ -1,20 +1,19 @@
 using System.Diagnostics;
-using System.Reflection;
-using System.Runtime.Loader;
-using Microsoft.EntityFrameworkCore;
+using System.Text.RegularExpressions;
 using Spectre.Console;
 
 namespace WonderDB.MigrationTool.Discovery;
 
 /// <summary>
-/// Metadata about a DbContext discovered via reflection from the Infrastructure assembly.
+/// Metadata about a DbContext discovered from source code scanning.
+/// No assembly loading required — fully version-agnostic.
 /// </summary>
 public class DbContextInfo
 {
     /// <summary>
-    /// The System.Type of the DbContext class.
+    /// The simple class name of the DbContext (e.g., "AppDbContext").
     /// </summary>
-    public Type DbContextType { get; set; } = null!;
+    public string ContextName { get; set; } = string.Empty;
 
     /// <summary>
     /// Inferred schema name (derived from the context class name).
@@ -22,88 +21,92 @@ public class DbContextInfo
     public string SchemaName { get; set; } = string.Empty;
 
     /// <summary>
-    /// Absolute path to the loaded assembly on disk.
+    /// Absolute path to the Infrastructure project folder.
     /// </summary>
-    public string AssemblyPath { get; set; } = string.Empty;
+    public string ProjectPath { get; set; } = string.Empty;
 }
 
 /// <summary>
-/// Loads the Infrastructure assembly via reflection and discovers all DbContext subclasses.
-/// Will invoke 'dotnet build' if the compiled DLL is not found.
+/// Discovers DbContext classes by scanning source code files in the Infrastructure project.
+/// Does NOT load assemblies — making it fully version-agnostic and scalable.
 /// </summary>
 public class InfrastructureLoader
 {
+    // Regex to find classes that inherit from DbContext
+    // Matches: "class SomeName : DbContext" or "class SomeName : SomeBase, ISomething" where SomeBase contains "DbContext"
+    private static readonly Regex DbContextClassRegex = new(
+        @"class\s+(\w+)\s*(?:<[^>]*>)?\s*:\s*([^{]+)",
+        RegexOptions.Compiled | RegexOptions.Multiline);
+
     /// <summary>
-    /// Build (if necessary) and load the Infrastructure assembly, returning the loaded Assembly.
+    /// Scan the Infrastructure project's source files to discover DbContext classes.
+    /// This is a lightweight, version-agnostic alternative to assembly reflection.
     /// </summary>
-    public async Task<Assembly> LoadAssemblyAsync(string infrastructurePath)
+    public Task<List<DbContextInfo>> DiscoverDbContextsAsync(string infrastructurePath)
+    {
+        var contexts = new List<DbContextInfo>();
+
+        // Scan all .cs files in the project
+        var csFiles = Directory.GetFiles(infrastructurePath, "*.cs", SearchOption.AllDirectories)
+            .Where(f => !f.Contains(Path.Combine("bin", "")) && 
+                        !f.Contains(Path.Combine("obj", "")) &&
+                        !f.Contains("WonderDb_DesignTimeFactory"))
+            .ToList();
+
+        foreach (var file in csFiles)
+        {
+            var content = File.ReadAllText(file);
+            var matches = DbContextClassRegex.Matches(content);
+
+            foreach (Match match in matches)
+            {
+                var className = match.Groups[1].Value.Trim();
+                var baseTypes = match.Groups[2].Value.Trim();
+
+                // Check if any base type contains "DbContext" and does NOT contain "IDesignTimeDbContextFactory"
+                if (baseTypes.Contains("DbContext", StringComparison.OrdinalIgnoreCase) && 
+                    !baseTypes.Contains("IDesignTimeDbContextFactory", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Skip abstract classes
+                    var lineStart = content.LastIndexOf('\n', match.Index) + 1;
+                    var lineContent = content[lineStart..match.Index];
+                    if (lineContent.Contains("abstract", StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    contexts.Add(new DbContextInfo
+                    {
+                        ContextName = className,
+                        SchemaName = DeriveSchemaName(className),
+                        ProjectPath = infrastructurePath
+                    });
+                }
+            }
+        }
+
+        return Task.FromResult(contexts);
+    }
+
+    /// <summary>
+    /// Ensure the project builds successfully. Called before EF Core CLI operations.
+    /// </summary>
+    public async Task EnsureProjectBuildsAsync(string infrastructurePath)
     {
         var csprojFile = Directory.GetFiles(infrastructurePath, "*.csproj", SearchOption.TopDirectoryOnly)
             .FirstOrDefault()
             ?? throw new InvalidOperationException(
-                $"No .csproj file found in '{infrastructurePath}'. Ensure the path points to the Infrastructure project folder.");
+                $"No .csproj file found in '{infrastructurePath}'.");
 
-        var projectName = Path.GetFileNameWithoutExtension(csprojFile);
-        var dllPath = FindCompiledAssembly(infrastructurePath, projectName);
-
-        if (dllPath == null || !File.Exists(dllPath))
-        {
-            AnsiConsole.MarkupLine("[yellow]⚡ Compiled assembly not found. Building project...[/]");
-            await BuildProjectAsync(csprojFile);
-
-            dllPath = FindCompiledAssembly(infrastructurePath, projectName)
-                ?? throw new InvalidOperationException(
-                    "Build succeeded but the compiled assembly could not be located.");
-        }
-
-        AnsiConsole.MarkupLine($"[blue]ℹ Loading assembly:[/] {Path.GetFileName(dllPath)}");
-
-        var loadContext = new MigrationAssemblyLoadContext(dllPath);
-        return loadContext.LoadFromAssemblyPath(dllPath);
-    }
-
-    /// <summary>
-    /// Discover all concrete classes that inherit from DbContext in the given assembly.
-    /// </summary>
-    public List<DbContextInfo> DiscoverDbContexts(Assembly assembly)
-    {
-        var baseType = typeof(DbContext);
-        var contexts = new List<DbContextInfo>();
-
-        Type[] exportedTypes;
-        try
-        {
-            exportedTypes = assembly.GetExportedTypes();
-        }
-        catch (ReflectionTypeLoadException ex)
-        {
-            // Some types may fail to load due to missing dependencies — use the ones that loaded
-            exportedTypes = ex.Types.Where(t => t != null).ToArray()!;
-        }
-
-        foreach (var type in exportedTypes)
-        {
-            if (type.IsAbstract || type.IsInterface || !baseType.IsAssignableFrom(type))
-                continue;
-
-            contexts.Add(new DbContextInfo
-            {
-                DbContextType = type,
-                SchemaName = DeriveSchemaName(type),
-                AssemblyPath = assembly.Location
-            });
-        }
-
-        return contexts;
+        AnsiConsole.MarkupLine("[blue]ℹ Building project...[/]");
+        await BuildProjectAsync(csprojFile);
     }
 
     /// <summary>
     /// Derive a schema name from the context type name by convention.
     /// "OrderDbContext" → "orders", "AuditContext" → "audit"
     /// </summary>
-    private static string DeriveSchemaName(Type contextType)
+    private static string DeriveSchemaName(string contextName)
     {
-        var name = contextType.Name;
+        var name = contextName;
 
         if (name.EndsWith("DbContext", StringComparison.OrdinalIgnoreCase))
             name = name[..^9];
@@ -111,31 +114,6 @@ public class InfrastructureLoader
             name = name[..^7];
 
         return name.ToLowerInvariant();
-    }
-
-    /// <summary>
-    /// Search bin/Debug and bin/Release for the project's compiled DLL across all TFM folders.
-    /// </summary>
-    private static string? FindCompiledAssembly(string infrastructurePath, string projectName)
-    {
-        string[] configurations = ["Debug", "Release"];
-
-        foreach (var config in configurations)
-        {
-            var basePath = Path.Combine(infrastructurePath, "bin", config);
-
-            if (!Directory.Exists(basePath))
-                continue;
-
-            foreach (var tfmDir in Directory.GetDirectories(basePath))
-            {
-                var dllPath = Path.Combine(tfmDir, $"{projectName}.dll");
-                if (File.Exists(dllPath))
-                    return dllPath;
-            }
-        }
-
-        return null;
     }
 
     /// <summary>
@@ -180,31 +158,5 @@ public class InfrastructureLoader
         }
 
         AnsiConsole.MarkupLine("[green]✓ Build succeeded.[/]");
-    }
-}
-
-/// <summary>
-/// Custom AssemblyLoadContext that resolves dependencies from the same directory as the loaded assembly.
-/// Uses a collectible context so the assembly can be unloaded later.
-/// </summary>
-internal sealed class MigrationAssemblyLoadContext : AssemblyLoadContext
-{
-    private readonly AssemblyDependencyResolver _resolver;
-
-    public MigrationAssemblyLoadContext(string assemblyPath) : base(isCollectible: true)
-    {
-        _resolver = new AssemblyDependencyResolver(assemblyPath);
-    }
-
-    protected override Assembly? Load(AssemblyName assemblyName)
-    {
-        var assemblyPath = _resolver.ResolveAssemblyToPath(assemblyName);
-        return assemblyPath != null ? LoadFromAssemblyPath(assemblyPath) : null;
-    }
-
-    protected override IntPtr LoadUnmanagedDll(string unmanagedDllName)
-    {
-        var libraryPath = _resolver.ResolveUnmanagedDllToPath(unmanagedDllName);
-        return libraryPath != null ? LoadUnmanagedDllFromPath(libraryPath) : IntPtr.Zero;
     }
 }

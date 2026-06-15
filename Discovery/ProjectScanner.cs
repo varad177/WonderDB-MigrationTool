@@ -98,3 +98,6 @@ public class ProjectScanner
         return Path.GetDirectoryName(infraPath) ?? infraPath;
     }
 }
+
+
+//its only job is to discover Clean Architecture projects in a folder structure.

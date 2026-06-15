@@ -1,17 +1,17 @@
-using WonderDB.MigrationTool.Discovery;
-
 namespace WonderDB.MigrationTool.Providers;
 
 /// <summary>
 /// Shared context object passed to every migration provider method.
 /// Contains all information needed to connect to and migrate a specific database.
+/// Uses string-based context identification — no assembly loading required.
 /// </summary>
 public class MigrationContext
 {
     /// <summary>
-    /// The DbContext type discovered from the Infrastructure assembly (null for MongoDB).
+    /// The simple class name of the DbContext (e.g., "AppDbContext").
+    /// Used to pass --context to dotnet ef CLI.
     /// </summary>
-    public Type? DbContextType { get; set; }
+    public string? ContextName { get; set; }
 
     /// <summary>
     /// Fully-qualified connection string for the target database.
@@ -21,7 +21,7 @@ public class MigrationContext
     /// <summary>
     /// Detected database provider type (SqlServer, PostgreSQL, MongoDB, SQLite).
     /// </summary>
-    public DbProviderType ProviderType { get; set; }
+    public Discovery.DbProviderType ProviderType { get; set; }
 
     /// <summary>
     /// Absolute path to the Infrastructure project folder.
@@ -42,9 +42,4 @@ public class MigrationContext
     /// Schema name derived from the DbContext (e.g., "orders").
     /// </summary>
     public string SchemaName { get; set; } = string.Empty;
-
-    /// <summary>
-    /// The loaded Infrastructure assembly (used for MongoDB migration discovery).
-    /// </summary>
-    public System.Reflection.Assembly? InfrastructureAssembly { get; set; }
 }

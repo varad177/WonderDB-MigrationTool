@@ -13,7 +13,7 @@
     <PackageId>wonderdb-migration-tool</PackageId>
     <Version>1.0.0</Version>
     <Authors>WonderBiz Technologies</Authors>
-    <Description>Database migration tool for .NET Clean Architecture projects. Discovers DbContexts from Infrastructure assemblies, resolves configuration, and runs EF Core / MongoDB migrations programmatically.</Description>
+    <Description>Database migration tool for .NET Clean Architecture projects. Discovers DbContexts from source code, resolves configuration, and orchestrates EF Core CLI / MongoDB migrations. Version-agnostic — works with any EF Core version.</Description>
     <PackageProjectUrl>https://github.com/wonderbiz/wonderdb-migration-tool</PackageProjectUrl>
     <RepositoryUrl>https://github.com/wonderbiz/wonderdb-migration-tool</RepositoryUrl>
     <PackageTags>efcore;migrations;database;cli;mongodb;clean-architecture</PackageTags>
@@ -35,13 +35,9 @@
     <!-- Dependency injection -->
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
 
-    <!-- EF Core migrations -->
-    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.10" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.10">
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.10" />
-    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.10" />
+    <!-- Database connectivity (ADO.NET — lightweight, no EF Core dependency) -->
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="5.1.7" />
+    <PackageReference Include="Npgsql" Version="8.0.6" />
 
     <!-- MongoDB -->
     <PackageReference Include="MongoDB.Driver" Version="2.28.0" />

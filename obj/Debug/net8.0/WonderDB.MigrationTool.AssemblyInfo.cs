@@ -16,7 +16,7 @@ using System.Reflection;
     "s from source code, resolves configuration, and orchestrates EF Core CLI / Mongo" +
     "DB migrations. Version-agnostic — works with any EF Core version."))]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+90617b1c769d09afeddcd421a0479aa3317190e4")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+bda32c3fc99abfd6b266183d78429a318df6b580")]
 [assembly: System.Reflection.AssemblyProductAttribute("WonderDB.MigrationTool")]
 [assembly: System.Reflection.AssemblyTitleAttribute("WonderDB.MigrationTool")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

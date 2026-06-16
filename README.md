@@ -160,6 +160,4 @@ During runtime operations, the tool prompts for your schema and securely injects
 
 ---
 
-## 📄 License
 
-MIT © WonderBiz Technologies

@@ -71,7 +71,7 @@ public class ConfigResolver
     /// The project root is the first directory containing appsettings.json or a .sln file.
     /// Falls back to the parent of the Infrastructure directory, then the Infrastructure directory itself.
     /// </summary>
-    private static string FindProjectRoot(string infrastructurePath)
+      private static string FindProjectRoot(string infrastructurePath)
     {
         var dir = new DirectoryInfo(infrastructurePath);
 
@@ -79,20 +79,7 @@ public class ConfigResolver
         if (File.Exists(Path.Combine(dir.FullName, "appsettings.json")))
             return dir.FullName;
 
-        // Walk upward
-        var parent = dir.Parent;
-        while (parent != null)
-        {
-            if (File.Exists(Path.Combine(parent.FullName, "appsettings.json")))
-                return parent.FullName;
-
-            if (parent.GetFiles("*.sln").Length > 0)
-                return parent.FullName;
-
-            parent = parent.Parent;
-        }
-
-        // Fallback: look for an API/Web sibling project that likely has appsettings.json
+        // Check for sibling API/Web projects first (Clean Architecture sibling pattern)
         if (dir.Parent != null)
         {
             var siblings = dir.Parent.GetDirectories();
@@ -109,6 +96,20 @@ public class ConfigResolver
             }
         }
 
+        // Walk upward
+        var parent = dir.Parent;
+        while (parent != null)
+        {
+            if (File.Exists(Path.Combine(parent.FullName, "appsettings.json")))
+                return parent.FullName;
+
+            if (parent.GetFiles("*.sln").Length > 0)
+                return parent.FullName;
+
+            parent = parent.Parent;
+        }
+
         return infrastructurePath;
     }
+
 }

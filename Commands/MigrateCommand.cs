@@ -168,7 +168,8 @@ public static class MigrateCommand
                         InfrastructurePath = infrastructurePath,
                         ProjectName = projectName,
                         DatabaseName = dbName,
-                        SchemaName = schemaName
+                        SchemaName = schemaName,
+                        DefaultSchemaName = ctxInfo.SchemaName
                     };
 
                     AnsiConsole.WriteLine();
@@ -283,7 +284,8 @@ public static class MigrateCommand
                     InfrastructurePath = infrastructurePath,
                     ProjectName = projectName,
                     DatabaseName = cs.Key,
-                    SchemaName = schemaName
+                    SchemaName = schemaName,
+                    DefaultSchemaName = ctxInfo.SchemaName
                 };
 
                 var provider = ResolveProvider(services, providerType);

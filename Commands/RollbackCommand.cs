@@ -130,7 +130,8 @@ public static class RollbackCommand
                 InfrastructurePath = infrastructurePath,
                 ProjectName = projectName,
                 DatabaseName = dbName,
-                SchemaName = schemaName
+                SchemaName = schemaName,
+                DefaultSchemaName = ctxInfo.SchemaName
             };
 
             IDbMigrationProvider provider = providerType == DbProviderType.MongoDB

@@ -104,7 +104,8 @@ public static class StatusCommand
                     ProviderType = providerType,
                     InfrastructurePath = infrastructurePath,
                     DatabaseName = cs.Key,
-                    SchemaName = ctxInfo.SchemaName
+                    SchemaName = ctxInfo.SchemaName,
+                    DefaultSchemaName = ctxInfo.SchemaName
                 };
 
                 IDbMigrationProvider provider = providerType == DbProviderType.MongoDB

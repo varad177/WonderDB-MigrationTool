@@ -42,4 +42,9 @@ public class MigrationContext
     /// Schema name derived from the DbContext (e.g., "orders").
     /// </summary>
     public string SchemaName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The fallback default schema name detected from the DbContext (e.g., "orders").
+    /// </summary>
+    public string DefaultSchemaName { get; set; } = string.Empty;
 }

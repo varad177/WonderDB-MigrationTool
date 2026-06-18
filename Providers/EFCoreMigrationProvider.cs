@@ -13,9 +13,7 @@ namespace WonderDB.MigrationTool.Providers;
 /// </summary>
 public class EFCoreMigrationProvider : IDbMigrationProvider
 {
-    // Session-level cache: tracks which .csproj paths were already restored this session.
-    // Avoids redundant dotnet restore calls during batch migrations.
-    private static readonly HashSet<string> _restoredProjects = new(StringComparer.OrdinalIgnoreCase);
+
     public async Task MigrateAsync(MigrationContext context)
     {
         var tempFactoryPath = Path.Combine(context.InfrastructurePath, "WonderDb_DesignTimeFactory.cs");
@@ -232,7 +230,11 @@ public class EFCoreMigrationProvider : IDbMigrationProvider
             // MAGIC TRICK: Make the migration dynamically schema-aware AND restore original Context Type!
             if (!string.IsNullOrWhiteSpace(context.SchemaName))
             {
-                var envReplacer = $"System.Environment.GetEnvironmentVariable(\"WONDERDB_SCHEMA\") ?? \"{context.SchemaName}\"";
+                var fallbackSchema = context.SchemaName == "__WONDERDB_DYNAMIC_SCHEMA__"
+                    ? (string.IsNullOrWhiteSpace(context.DefaultSchemaName) ? "dbo" : context.DefaultSchemaName)
+                    : context.SchemaName;
+
+                var envReplacer = $"System.Environment.GetEnvironmentVariable(\"WONDERDB_SCHEMA\") ?? \"{fallbackSchema}\"";
                 var csFiles = Directory.GetFiles(Path.Combine(context.InfrastructurePath, outputDir), "*.cs");
                 
                 // We must use the fully-qualified original context name so it compiles without missing 'using' directives
@@ -274,12 +276,7 @@ public class EFCoreMigrationProvider : IDbMigrationProvider
                 }
             }
 
-            // Invalidate restore cache for this project so the next operation
-            // sees the newly generated migration files in a fresh build.
-            var infraCsproj = Directory.GetFiles(context.InfrastructurePath, "*.csproj",
-                SearchOption.TopDirectoryOnly).FirstOrDefault();
-            if (infraCsproj != null)
-                _restoredProjects.Remove(Path.GetFullPath(infraCsproj));
+
         }
         finally
         {
@@ -344,7 +341,7 @@ public class EFCoreMigrationProvider : IDbMigrationProvider
 
         var isGenerating = schemaName == "__WONDERDB_DYNAMIC_SCHEMA__";
 
-        if (isGenerating)
+        if (isGenerating || hasSchema)
         {
             var historyTableOption = context.ProviderType switch
             {
@@ -356,51 +353,6 @@ public class EFCoreMigrationProvider : IDbMigrationProvider
                     $"UseSqlite(@\"{connStr}\")"
             };
 
-            // Emit a subclass that calls HasDefaultSchema before base.OnModelCreating.
-            // This forces EF Core to output 'schema: "__WONDERDB_DYNAMIC_SCHEMA__"' into the C# files.
-            factoryCode = $@"
-using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Design;
-
-namespace WonderDB.Temp
-{{
-    internal class WonderDbSchemaContext : {contextFullName}
-    {{
-        public WonderDbSchemaContext(DbContextOptions<{contextFullName}> options)
-            : base(options) {{ }}
-
-        protected override void OnModelCreating(ModelBuilder modelBuilder)
-        {{
-            modelBuilder.HasDefaultSchema(""{schemaName}"");
-            base.OnModelCreating(modelBuilder);
-        }}
-    }}
-
-    public class WonderDbTempFactory : IDesignTimeDbContextFactory<WonderDbSchemaContext>
-    {{
-        public WonderDbSchemaContext CreateDbContext(string[] args)
-        {{
-            var builder = new DbContextOptionsBuilder<{contextFullName}>();
-            builder.{historyTableOption};
-            return new WonderDbSchemaContext(builder.Options);
-        }}
-    }}
-}}";
-        }
-        else if (hasSchema)
-        {
-            var historyTableOption = context.ProviderType switch
-            {
-                DbProviderType.PostgreSQL =>
-                    $"UseNpgsql(@\"{connStr}\", opt => opt.MigrationsHistoryTable(\"__EFMigrationsHistory\", \"{schemaName}\"))",
-                DbProviderType.SqlServer =>
-                    $"UseSqlServer(@\"{connStr}\", opt => opt.MigrationsHistoryTable(\"__EFMigrationsHistory\", \"{schemaName}\"))",
-                _ =>
-                    $"UseSqlite(@\"{connStr}\")"
-            };
-
-            // For Status/Diff/Migrate runtime, DO NOT subclass!
-            // The C# migrations are dynamically schema-aware. We just configure the History table.
             factoryCode = $@"
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
@@ -481,45 +433,15 @@ namespace WonderDB.Temp
     }
 
     /// <summary>
-    /// Runs 'dotnet restore' only when:
-    ///  (a) the project hasn't been restored in this session, AND
-    ///  (b) obj/project.assets.json is missing or older than the .csproj.
-    /// Both conditions must be true to trigger a real restore.
+    /// Run 'dotnet restore' on the project.
     /// </summary>
     private static async Task RestoreIfNeededAsync(string csprojPath, string workingDir, string label)
     {
-        var key = Path.GetFullPath(csprojPath);
-
-        // Check session cache first
-        if (_restoredProjects.Contains(key))
-        {
-            AnsiConsole.MarkupLine($"[grey]â„¹ Skipping restore ({label}) â€” already done this session.[/]");
-            return;
-        }
-
-        // Check assets.json freshness
-        var assetsJson = Path.Combine(
-            Path.GetDirectoryName(csprojPath)!, "obj", "project.assets.json");
-
-        if (File.Exists(assetsJson))
-        {
-            var assetTime  = File.GetLastWriteTimeUtc(assetsJson);
-            var csprojTime = File.GetLastWriteTimeUtc(csprojPath);
-            if (assetTime >= csprojTime)
-            {
-                AnsiConsole.MarkupLine($"[grey]â„¹ Skipping restore ({label}) â€” assets already up to date.[/]");
-                _restoredProjects.Add(key);
-                return;
-            }
-        }
-
-        AnsiConsole.MarkupLine($"[blue]â„¹ Restoring {label} project dependencies...[/]");
+        AnsiConsole.MarkupLine($"[blue]ℹ Restoring {label} project dependencies...[/]");
         var (exitCode, _, error) = await RunProcessAsync("dotnet", $"restore \"{csprojPath}\"", workingDir);
 
         if (exitCode != 0)
-            AnsiConsole.MarkupLine($"[yellow]âš  Restore warning for {label} project: {Markup.Escape(error.Trim())}[/]");
-        else
-            _restoredProjects.Add(key);
+            AnsiConsole.MarkupLine($"[yellow]⚠ Restore warning for {label} project: {Markup.Escape(error.Trim())}[/]");
     }
 
     /// <summary>

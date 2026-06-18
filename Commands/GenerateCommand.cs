@@ -114,7 +114,8 @@ public static class GenerateCommand
                 InfrastructurePath = infrastructurePath,
                 ProjectName = projectName,
                 DatabaseName = dbName,
-                SchemaName = ctxInfo.SchemaName
+                SchemaName = "__WONDERDB_DYNAMIC_SCHEMA__",
+                DefaultSchemaName = ctxInfo.SchemaName
             };
 
             IDbMigrationProvider provider = providerType == DbProviderType.MongoDB

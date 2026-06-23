@@ -18,6 +18,11 @@ Designed with a **first-class multi-tenant architecture**, this tool dynamically
 - **Robust Error Handling** — Global exception catching prevents the CLI from crashing to the shell when EF Core commands fail.
 
 ---
+## ✨ Architectural Diagram
+<img width="1536" height="1024" alt="WonderDb" src="https://github.com/user-attachments/assets/ac390ab8-9394-4959-834b-2d6d792d30c8" />
+
+
+---
 
 ## 📦 Installation & Usage
 

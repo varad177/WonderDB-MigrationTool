@@ -19,7 +19,8 @@ Designed with a **first-class multi-tenant architecture**, this tool dynamically
 
 ---
 ## ✨ Architectural Diagram
-<img width="1536" height="1024" alt="WonderDb" src="https://github.com/user-attachments/assets/ac390ab8-9394-4959-834b-2d6d792d30c8" />
+<img width="1228" height="819" alt="WonderDb-Picsart" src="https://github.com/user-attachments/assets/44862471-051e-49cd-be77-84b84331e58c" />
+
 
 
 ---
